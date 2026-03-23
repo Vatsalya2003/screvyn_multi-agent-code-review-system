@@ -1,0 +1,36 @@
+# ── Secrets (NEVER commit these) ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+serviceAccountKey.json
+firebase-credentials.json
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ── Node (frontend) ──
+node_modules/
+.next/
+out/
+.env.local
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ──
+.DS_Store
+Thumbs.db
