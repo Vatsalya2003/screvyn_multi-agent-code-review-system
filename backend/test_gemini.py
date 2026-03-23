@@ -23,31 +23,48 @@ def get_user(user_id):
     return result.fetchone()
 """
 
+# SYSTEM_PROMPT = """
+# You are a senior security engineer reviewing code for vulnerabilities.
+# Analyze the provided code for:
+# - SQL injection, command injection
+# - Hardcoded credentials, API keys, secrets
+# - Other security issues
+
+# Respond ONLY with a JSON object in this exact format, no other text:
+# {
+#   "findings": [
+#     {
+#       "type": "security",
+#       "severity": "P0",
+#       "title": "Short issue name",
+#       "line_range": "10-12",
+#       "flagged_code": "the problematic code",
+#       "explanation": "Why this is dangerous",
+#       "fixed_code": "the corrected code"
+#     }
+#   ]
+# }
+
 SYSTEM_PROMPT = """
-You are a senior security engineer reviewing code for vulnerabilities.
-Analyze the provided code for:
-- SQL injection, command injection
-- Hardcoded credentials, API keys, secrets
-- Other security issues
+You are a senior security engineer. Analyze code for vulnerabilities.
 
-Respond ONLY with a JSON object in this exact format, no other text:
-{
-  "findings": [
-    {
-      "type": "security",
-      "severity": "P0",
-      "title": "Short issue name",
-      "line_range": "10-12",
-      "flagged_code": "the problematic code",
-      "explanation": "Why this is dangerous",
-      "fixed_code": "the corrected code"
-    }
-  ]
-}
+You MUST respond with ONLY a raw JSON object. No markdown, no code fences, no explanation.
 
-Return ONLY the JSON object. No markdown, no explanation, no code fences.
+Use EXACTLY this structure — do not rename any fields:
+
+{"findings": [{"type": "security", "severity": "P0", "title": "SQL Injection", "line_range": "5-7", "flagged_code": "the bad code here", "explanation": "why it is dangerous", "fixed_code": "the corrected code"}]}
+
+Rules for field values:
+- "type": always "security"
+- "severity": must be exactly "P0", "P1", or "P2" — never "High"/"Medium"/"Low"
+- "title": short name, under 100 characters
+- "line_range": must be like "5" or "5-7" — digits and optional dash only
+- "flagged_code": the actual vulnerable code snippet
+- "explanation": why this is dangerous in plain English
+- "fixed_code": the corrected version of the code
+
+If no issues found, return: {"findings": []}
 """
-
 
 def run_test(round_num: int) -> bool:
     print(f"\n{'='*50}")
