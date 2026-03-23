@@ -1,0 +1,7 @@
+title = "Screvyn gitleaks config"
+
+[allowlist]
+  paths = [
+    '''backend/tests/fixtures/.*''',
+    '''backend/test_gemini\.py'''
+  ]
