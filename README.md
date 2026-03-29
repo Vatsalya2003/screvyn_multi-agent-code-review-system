@@ -39,6 +39,12 @@ Four specialist agents run in parallel, each analyzing your code from a differen
 - **Notification fan-out** — GitHub comment + Slack + Teams + Email simultaneously
 
 ---
+## Architecture
+
+<p align="center">
+  <img src="Asset/screvyn_full_architecture.svg" alt="Screvyn Architecture" width="700" />
+</p>
+---
 
 ## Demo
 
