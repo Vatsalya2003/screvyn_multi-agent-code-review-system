@@ -26,12 +26,27 @@ def _extract_json(text: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    cleaned = re.sub(r"^```(?:json)?\s*\n?", "", text)
-    cleaned = re.sub(r"\n?```\s*$", "", cleaned).strip()
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
+    # cleaned = re.sub(r"^```(?:json)?\s*\n?", "", text)
+    # cleaned = re.sub(r"\n?```\s*$", "", cleaned).strip()
+    # try:
+    #     return json.loads(cleaned)
+    # except json.JSONDecodeError:
+    #     pass
+    
+    # Strategy 2: strip markdown fences (handles ```json and ``` blocks)
+    if "```" in text:
+        # Find content between first ``` and last ```
+        parts = text.split("```")
+        for part in parts:
+            candidate = part.strip()
+            # Remove language hint like "json" at the start
+            if candidate.startswith("json"):
+                candidate = candidate[4:].strip()
+            if candidate.startswith("{"):
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
 
     first_brace = text.find("{")
     last_brace = text.rfind("}")
