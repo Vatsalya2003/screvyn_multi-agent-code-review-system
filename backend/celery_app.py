@@ -20,6 +20,9 @@ How to run:
 """
 
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from celery import Celery
 from dotenv import load_dotenv
@@ -27,6 +30,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+# Upstash requires TLS — Celery needs ssl_cert_reqs explicitly
+if REDIS_URL.startswith("rediss://") and "ssl_cert_reqs" not in REDIS_URL:
+    separator = "&" if "?" in REDIS_URL else "?"
+    REDIS_URL = REDIS_URL + separator + "ssl_cert_reqs=CERT_REQUIRED"
 
 app = Celery(
     "screvyn",

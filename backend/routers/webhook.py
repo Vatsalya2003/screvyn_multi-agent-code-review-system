@@ -130,6 +130,7 @@ async def github_webhook(
         )
 
     # Step 6: Enqueue the review task
+    import celery_app  # noqa: F401 — ensures Celery uses Redis, not default AMQP
     from tasks.review_task import review_pr
 
     task = review_pr.delay(
