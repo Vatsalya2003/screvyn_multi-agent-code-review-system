@@ -25,6 +25,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import reviews
+from routers.webhook import router as webhook_router
 
 # ─── Logging Setup ───────────────────────────────────────────
 #
@@ -63,7 +64,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Screvyn",
     description="AI Senior Developer — Multi-Agent Code Review System",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -97,6 +98,7 @@ app.add_middleware(
 # the full path becomes POST /api/review.
 #
 app.include_router(reviews.router, prefix="/api", tags=["Reviews"])
+app.include_router(webhook_router, tags=["Webhooks"])
 
 
 # ─── Health Check ────────────────────────────────────────────
@@ -111,5 +113,5 @@ async def health_check():
     return {
         "status": "ok",
         "service": "screvyn",
-        "version": "0.1.0",
+        "version": "0.2.0",
     }
