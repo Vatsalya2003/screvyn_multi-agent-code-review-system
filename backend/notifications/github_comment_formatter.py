@@ -1,12 +1,12 @@
 """
 GitHub PR comment formatter — renders findings as Markdown.
 
-Balanced style: structured enough to scan quickly, natural enough
-to read like a real engineer's review. Every finding shows:
-  - Category + severity + title + location (scannable header)
-  - Clear explanation (2-3 sentences)
-  - The problematic code
-  - The recommended fix (always included)
+Improvements over v1:
+  - Caps displayed findings (all P0s shown, then top P1/P2 up to MAX_SHOWN)
+  - Truncates fix code to MAX_FIX_LINES (no full class implementations)
+  - Tighter explanations (hard cap at 200 chars)
+  - Summary count at top for quick scanning
+  - Footer shows hidden count if any were trimmed
 """
 
 import logging
@@ -16,79 +16,91 @@ from core.review_style import SEVERITY_PREFIX, CATEGORY_LABEL
 
 logger = logging.getLogger(__name__)
 
+# ── Display limits ────────────────────────────────────────────
+MAX_SHOWN = 7          # max findings shown in full (all P0s always shown)
+MAX_FIX_LINES = 8      # truncate fix code after this many lines
+MAX_EXPLANATION = 200   # hard cap on explanation length (chars)
 
-def _severity_emoji(severity: str) -> str:
-    """Map severity to a simple indicator for PR comments."""
-    return {"P0": "P0 Critical", "P1": "P1 High", "P2": "P2 Medium"}.get(severity, severity)
+
+def _truncate_code(code: str, max_lines: int = MAX_FIX_LINES) -> str:
+    """Truncate code blocks that are too long."""
+    if not code or code in ("N/A", "No fix provided"):
+        return ""
+    lines = code.strip().split("\n")
+    if len(lines) <= max_lines:
+        return code.strip()
+    truncated = "\n".join(lines[:max_lines])
+    remaining = len(lines) - max_lines
+    return f"{truncated}\n// ... {remaining} more lines"
+
+
+def _truncate_explanation(text: str, max_len: int = MAX_EXPLANATION) -> str:
+    """Truncate explanation to max length, cutting at sentence boundary."""
+    text = text.strip()
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len].rfind(".")
+    if cut > 80:
+        return text[:cut + 1]
+    return text[:max_len].rstrip() + "..."
 
 
 def _format_single_finding(finding: Finding, index: int) -> str:
     """
-    Format one finding for a GitHub PR comment.
+    Format one finding — compact, scannable, always has the fix.
 
-    Output example:
-        ### blocking | Security: SQL Injection in `get_user` (line 12-14)
+    Output:
+        ### blocking | Security: SQL Injection in get_user (line 12-14)
 
-        This f-string puts user input directly into the SQL query.
-        An attacker passes `uid = "1; DROP TABLE users"` and your
-        users table is gone.
+        User input goes directly into the SQL query. An attacker passes
+        uid="1; DROP TABLE users" and your users table is gone.
 
         **Flagged code:**
-        ```python
+        ```
         db.execute(f'SELECT * FROM users WHERE id = {user_id}')
         ```
 
         **Recommended fix:**
-        ```python
+        ```
         db.execute('SELECT * FROM users WHERE id = ?', (user_id,))
         ```
     """
     prefix = SEVERITY_PREFIX.get(finding.severity.value, "note")
     category = CATEGORY_LABEL.get(finding.type.value, finding.type.value)
-    location = f"(line {finding.line_range})"
+    location = f"(line {finding.line_range})" if finding.line_range else ""
 
     lines = []
 
-    # Header — scannable: severity | category: issue (location)
+    # Header
     lines.append(f"### {prefix} | {category}: {finding.title} {location}")
     lines.append("")
 
-    # Explanation — clear and specific
-    explanation = finding.explanation.strip()
-    if len(explanation) > 400:
-        cut = explanation[:400].rfind(".")
-        if cut > 100:
-            explanation = explanation[: cut + 1]
-    lines.append(explanation)
-    lines.append("")
+    # Explanation — capped
+    if finding.explanation:
+        lines.append(_truncate_explanation(finding.explanation))
+        lines.append("")
 
     # Flagged code
     if finding.flagged_code and finding.flagged_code != "N/A":
         lines.append("**Flagged code:**")
-        lines.append("```")
-        lines.append(finding.flagged_code.strip())
-        lines.append("```")
+        lines.append(f"```\n{finding.flagged_code.strip()}\n```")
         lines.append("")
 
-    # Recommended fix — ALWAYS include this
-    if finding.fixed_code and finding.fixed_code not in ("N/A", "No fix provided"):
+    # Recommended fix — truncated if too long
+    fix = _truncate_code(finding.fixed_code)
+    if fix:
         lines.append("**Recommended fix:**")
-        lines.append("```")
-        lines.append(finding.fixed_code.strip())
-        lines.append("```")
+        lines.append(f"```\n{fix}\n```")
         lines.append("")
 
-    # Extra context where available
+    # Extra context (one line)
     extras = []
     if finding.complexity_before and finding.complexity_after:
-        extras.append(
-            f"Complexity: {finding.complexity_before} → {finding.complexity_after}"
-        )
+        extras.append(f"Complexity: {finding.complexity_before} → {finding.complexity_after}")
     if finding.pattern_suggestion:
         extras.append(f"Consider: {finding.pattern_suggestion}")
     if finding.owasp_ref:
         extras.append(f"Ref: {finding.owasp_ref}")
-
     if extras:
         lines.append(" | ".join(extras))
         lines.append("")
@@ -100,16 +112,18 @@ def format_review_comment(review: Review) -> str:
     """
     Format a complete review as a GitHub PR Markdown comment.
 
-    Structure:
-      1. Summary line with counts
-      2. Blocking warning (if P0 exists)
-      3. Each finding with full detail
-      4. Subtle agent attribution at the bottom
+    Rules:
+      - All P0 findings are ALWAYS shown (they block merge)
+      - P1 + P2 shown up to MAX_SHOWN total
+      - Remaining findings summarized in footer
     """
     if review.total_findings == 0:
+        agents = ", ".join(review.agents_completed)
         return (
-            "Reviewed this PR — no security issues, performance concerns, "
-            "or code quality problems found. Good to merge. :white_check_mark:"
+            "Reviewed this PR — no issues found across security, performance, "
+            f"code quality, and architecture checks.\n\n"
+            f"<sub>Reviewed by {agents} agents in "
+            f"{review.review_duration_seconds:.0f}s | Screvyn</sub>"
         )
 
     lines = []
@@ -123,30 +137,34 @@ def format_review_comment(review: Review) -> str:
     if review.p2_count > 0:
         parts.append(f"{review.p2_count} nit{'s' if review.p2_count > 1 else ''}")
 
-    summary = ", ".join(parts)
-    lines.append(f"Reviewed this PR. Found {summary}.")
+    lines.append(f"Found {', '.join(parts)}.")
     lines.append("")
 
     if review.has_critical:
-        lines.append(
-            "> :rotating_light: **There are blocking issues that need "
-            "to be fixed before merge.**"
-        )
+        lines.append("> **Blocking issues must be fixed before merge.**")
         lines.append("")
 
-    lines.append("---")
-    lines.append("")
-
-    # ── Findings grouped by severity ─────────────────────
+    # ── Select which findings to show ────────────────────
     p0 = [f for f in review.findings if f.severity == Severity.P0]
     p1 = [f for f in review.findings if f.severity == Severity.P1]
     p2 = [f for f in review.findings if f.severity == Severity.P2]
 
-    all_ordered = p0 + p1 + p2
+    # Always show all P0s. Fill remaining slots with P1 then P2.
+    shown = list(p0)
+    remaining_slots = max(0, MAX_SHOWN - len(shown))
+    shown.extend(p1[:remaining_slots])
+    remaining_slots = max(0, MAX_SHOWN - len(shown))
+    shown.extend(p2[:remaining_slots])
 
-    for i, finding in enumerate(all_ordered):
+    hidden_count = review.total_findings - len(shown)
+
+    # ── Render findings ──────────────────────────────────
+    lines.append("---")
+    lines.append("")
+
+    for i, finding in enumerate(shown):
         lines.append(_format_single_finding(finding, i))
-        if i < len(all_ordered) - 1:
+        if i < len(shown) - 1:
             lines.append("---")
             lines.append("")
 
@@ -154,11 +172,15 @@ def format_review_comment(review: Review) -> str:
     lines.append("---")
     lines.append("")
 
-    agent_names = ", ".join(review.agents_completed)
+    if hidden_count > 0:
+        lines.append(f"*+{hidden_count} more findings not shown. "
+                      f"Run Screvyn locally for the full report.*")
+        lines.append("")
+
+    agents = ", ".join(review.agents_completed)
     duration = f"{review.review_duration_seconds:.0f}s"
     lines.append(
-        f"<sub>Reviewed by {agent_names} agents in {duration} | "
-        f"Screvyn Code Review</sub>"
+        f"<sub>Reviewed by {agents} agents in {duration} | Screvyn Code Review</sub>"
     )
 
     return "\n".join(lines)
@@ -167,48 +189,46 @@ def format_review_comment(review: Review) -> str:
 def format_review_comment_short(review: Review) -> str:
     """
     Compact version for Slack, Teams, and Email alerts.
-    Shows: summary + each finding with location, explanation, and fix.
+    Shows: summary + top 3 findings with location and fix.
     """
     if review.total_findings == 0:
-        return "Clean review — no issues found. Good to merge."
+        return f"**{review.repo}** — clean. No issues found."
 
     lines = []
 
     # Summary
-    lines.append(
-        f"Found {review.total_findings} issues: "
-        f"{review.p0_count} blocking, {review.p1_count} important, "
-        f"{review.p2_count} nits"
-    )
+    parts = []
+    if review.p0_count > 0:
+        parts.append(f"**{review.p0_count} blocking**")
+    if review.p1_count > 0:
+        parts.append(f"{review.p1_count} important")
+    if review.p2_count > 0:
+        parts.append(f"{review.p2_count} nit{'s' if review.p2_count > 1 else ''}")
+
+    lines.append(f"**{review.repo}** — {', '.join(parts)}.")
     if review.has_critical:
         lines.append("Blocking issues need to be fixed before merge.")
     lines.append("")
 
-    # Each finding: category + title + location + explanation + fix
-    for f in review.findings:
+    # Top 3 findings
+    top = review.findings[:3]
+    for f in top:
         prefix = SEVERITY_PREFIX.get(f.severity.value, "note")
         category = CATEGORY_LABEL.get(f.type.value, f.type.value)
+        loc = f"line {f.line_range}" if f.line_range else ""
 
-        lines.append(f"[{prefix} | {category}] {f.title} (line {f.line_range})")
+        lines.append(f"**{prefix}** | {category}: {f.title} ({loc})")
+        explanation = _truncate_explanation(f.explanation, 120)
+        lines.append(f"  {explanation}")
 
-        # Short explanation — first two sentences
-        explanation = f.explanation.strip()
-        sentences = explanation.split(". ")
-        short_explanation = ". ".join(sentences[:2])
-        if not short_explanation.endswith("."):
-            short_explanation += "."
-        if len(short_explanation) > 200:
-            short_explanation = short_explanation[:200].rstrip() + "..."
-        lines.append(f"  {short_explanation}")
-
-        # Fix — always include
-        if f.fixed_code and f.fixed_code not in ("N/A", "No fix provided"):
-            fix_lines = f.fixed_code.strip().split("\n")
-            if len(fix_lines) == 1 and len(fix_lines[0]) <= 100:
-                lines.append(f"  Fix: {fix_lines[0]}")
-            else:
-                lines.append(f"  Fix: {fix_lines[0][:100]}...")
-
+        fix = _truncate_code(f.fixed_code, 3)
+        if fix:
+            first_line = fix.split("\n")[0]
+            lines.append(f"  fix: `{first_line}`")
         lines.append("")
+
+    remaining = review.total_findings - 3
+    if remaining > 0:
+        lines.append(f"...and {remaining} more")
 
     return "\n".join(lines)

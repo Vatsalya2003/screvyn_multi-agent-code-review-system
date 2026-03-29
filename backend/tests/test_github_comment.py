@@ -261,4 +261,4 @@ class TestShortFormat:
             findings=[_make(fixed_code="db.execute('SELECT * WHERE id = ?', (uid,))")],
         )
         output = format_review_comment_short(review)
-        assert "Fix:" in output
+        assert "fix:" in output
