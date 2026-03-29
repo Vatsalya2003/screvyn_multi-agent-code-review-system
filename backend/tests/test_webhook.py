@@ -76,7 +76,7 @@ class TestSignatureVerification:
         with patch("routers.webhook.settings", _mock_settings()), \
              patch("routers.webhook.check_rate_limit", return_value=(True, 5, 50)), \
              patch("routers.webhook.increment_rate_limit", return_value=6), \
-             patch("tasks.review_task.review_pr.delay") as mock_task:
+             patch("routers.webhook._enqueue_review") as mock_task:
             mock_task.return_value = MagicMock(id="task-123")
             resp = client.post(
                 "/api/webhook",
@@ -124,7 +124,7 @@ class TestSignatureVerification:
         with patch("routers.webhook.settings", _mock_settings(webhook_secret="")), \
              patch("routers.webhook.check_rate_limit", return_value=(True, 5, 50)), \
              patch("routers.webhook.increment_rate_limit", return_value=6), \
-             patch("tasks.review_task.review_pr.delay") as mock_task:
+             patch("routers.webhook._enqueue_review") as mock_task:
             mock_task.return_value = MagicMock(id="task-123")
             resp = client.post(
                 "/api/webhook",
@@ -149,7 +149,7 @@ class TestEventHandling:
         with patch("routers.webhook.settings", _mock_settings()), \
              patch("routers.webhook.check_rate_limit", return_value=(True, 5, 50)), \
              patch("routers.webhook.increment_rate_limit", return_value=6), \
-             patch("tasks.review_task.review_pr.delay") as mock_task:
+             patch("routers.webhook._enqueue_review") as mock_task:
             mock_task.return_value = MagicMock(id="task-123")
             resp = client.post(
                 "/api/webhook",
@@ -268,7 +268,7 @@ class TestWebhookRateLimiting:
         with patch("routers.webhook.settings", _mock_settings()), \
              patch("routers.webhook.check_rate_limit", return_value=(allowed, count, 50)), \
              patch("routers.webhook.increment_rate_limit", return_value=count + 1), \
-             patch("tasks.review_task.review_pr.delay") as mock_task:
+             patch("routers.webhook._enqueue_review") as mock_task:
             mock_task.return_value = MagicMock(id="task-123")
             return client.post(
                 "/api/webhook",

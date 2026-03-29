@@ -60,6 +60,16 @@ def _verify_signature(payload: bytes, signature: str) -> bool:
 
     return hmac.compare_digest(expected, signature)
 
+def _enqueue_review(owner: str, repo: str, pr_number: int, installation_id: str):
+    """Enqueue a Celery review task. Separated for testability."""
+    import celery_app  # noqa: F401 — ensures Celery uses Redis config
+    from tasks.review_task import review_pr
+    return review_pr.delay(
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        installation_id=installation_id,
+    )
 
 @router.post("/api/webhook")
 async def github_webhook(
@@ -130,15 +140,17 @@ async def github_webhook(
         )
 
     # Step 6: Enqueue the review task
-    import celery_app  # noqa: F401 — ensures Celery uses Redis, not default AMQP
-    from tasks.review_task import review_pr
+    # import celery_app  # noqa: F401 — ensures Celery uses Redis, not default AMQP
+    # from tasks.review_task import review_pr
 
-    task = review_pr.delay(
-        owner=owner,
-        repo=repo,
-        pr_number=pr_number,
-        installation_id=installation_id,
-    )
+    # task = review_pr.delay(
+    #     owner=owner,
+    #     repo=repo,
+    #     pr_number=pr_number,
+    #     installation_id=installation_id,
+    # )
+    task = _enqueue_review(owner, repo, pr_number, installation_id)
+
 
     # Step 7: Increment rate limit AFTER successful enqueue
     increment_rate_limit(repo_full)
