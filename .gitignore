@@ -34,3 +34,4 @@ out/
 # ── OS ──
 .DS_Store
 Thumbs.db
+backend/firebase-credentials.json

@@ -8,6 +8,7 @@ Flow:
     4. Deduplicate and sort by severity
     5. Format as a Markdown comment
     6. Post the comment on the PR
+    7. Dispatch notifications (Teams, Email, Firestore)
 
 This runs in a Celery worker process, NOT in the FastAPI server.
 The webhook enqueues this task and returns 202 immediately.
@@ -56,6 +57,9 @@ def review_pr(self, owner: str, repo: str, pr_number: int, installation_id: str)
 
         pr_info = get_pr_details(owner, repo, pr_number)
         head_sha = pr_info["head_sha"]
+        pr_title = pr_info.get("title", "")
+        pr_author = pr_info.get("author", "")
+        pr_url = f"https://github.com/{full_repo}/pull/{pr_number}"
         logger.info("PR head SHA: %s", head_sha[:8])
 
         # Step 2: Fetch changed files
@@ -107,8 +111,6 @@ def review_pr(self, owner: str, repo: str, pr_number: int, installation_id: str)
             logger.info("Reviewing %s (%s)", file_info["filename"], file_info["language"])
             try:
                 result = run_review(file_info["content"], file_info["language"])
-                # Tag each finding with the filename so the PR comment
-                # shows which file the issue is in
                 for finding in result.get("all_findings", []):
                     finding.title = f"{file_info['filename']}: {finding.title}"
                 all_findings.extend(result.get("all_findings", []))
@@ -136,10 +138,21 @@ def review_pr(self, owner: str, repo: str, pr_number: int, installation_id: str)
         # Step 6: Post the comment on the PR
         post_pr_comment(owner, repo, pr_number, comment_body)
 
+        # Step 7: Dispatch notifications (Teams, Email, Firestore)
+        from notifications.dispatcher import dispatch_notifications
+
+        notification_results = dispatch_notifications(
+            review=review,
+            pr_number=pr_number,
+            pr_title=pr_title,
+            pr_author=pr_author,
+            pr_url=pr_url,
+        )
+
         duration = round(time.time() - start, 1)
         logger.info(
-            "Review complete for %s#%d: %d findings in %ss",
-            full_repo, pr_number, len(all_findings), duration,
+            "Review complete for %s#%d: %d findings in %ss | notifications: %s",
+            full_repo, pr_number, len(all_findings), duration, notification_results,
         )
 
         return {
@@ -153,6 +166,7 @@ def review_pr(self, owner: str, repo: str, pr_number: int, installation_id: str)
             "agents_completed": review.agents_completed,
             "agents_failed": review.agents_failed,
             "duration": duration,
+            "notifications": {k: bool(v) for k, v in notification_results.items()},
         }
 
     except Exception as exc:
