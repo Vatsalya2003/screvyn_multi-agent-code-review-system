@@ -10,6 +10,8 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: "fake-key-for-ci"
     steps:
       - uses: actions/checkout@v4
 
@@ -34,14 +36,10 @@ jobs:
 
       - name: Run agent normalization tests (Phase 2)
         working-directory: backend
-        env:
-          GEMINI_API_KEY: "fake-key-for-ci"
         run: pytest tests/test_agents.py::TestNormalization -v
 
       - name: Run orchestrator merge tests (Phase 4)
         working-directory: backend
-        env:
-          GEMINI_API_KEY: "fake-key-for-ci"
         run: pytest tests/test_orchestrator.py::TestMergeFindingsUnit -v
 
       - name: Run severity tests (Phase 5)
@@ -58,6 +56,4 @@ jobs:
 
       - name: Run webhook tests (Phase 6)
         working-directory: backend
-        env:
-          GEMINI_API_KEY: "fake-key-for-ci"
         run: pytest tests/test_webhook.py -v
