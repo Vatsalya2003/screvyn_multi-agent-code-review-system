@@ -125,17 +125,37 @@ def run_architecture(state: ReviewState) -> dict:
         }
 
 
+# def merge_findings(state: ReviewState) -> dict:
+#     all_findings = (
+#         state.get("security_findings", [])
+#         + state.get("performance_findings", [])
+#         + state.get("smell_findings", [])
+#         + state.get("architecture_findings", [])
+#     )
+#     severity_order = {"P0": 0, "P1": 1, "P2": 2}
+#     all_findings.sort(key=lambda f: severity_order.get(f.severity.value, 99))
+#     logger.info(
+#         "Merged %d total findings from %d agents",
+#         len(all_findings),
+#         len(state.get("agents_completed", [])),
+#     )
+#     return {"all_findings": all_findings}
 def merge_findings(state: ReviewState) -> dict:
+    from core.severity import deduplicate_findings
+
     all_findings = (
         state.get("security_findings", [])
         + state.get("performance_findings", [])
         + state.get("smell_findings", [])
         + state.get("architecture_findings", [])
     )
-    severity_order = {"P0": 0, "P1": 1, "P2": 2}
-    all_findings.sort(key=lambda f: severity_order.get(f.severity.value, 99))
+
+    raw_count = len(all_findings)
+    all_findings = deduplicate_findings(all_findings)
+
     logger.info(
-        "Merged %d total findings from %d agents",
+        "Merged %d findings → %d after dedup (from %d agents)",
+        raw_count,
         len(all_findings),
         len(state.get("agents_completed", [])),
     )
