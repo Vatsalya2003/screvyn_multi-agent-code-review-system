@@ -1,283 +1,268 @@
 <p align="center">
-  <img src="Asset/Screvyn_banner.png" alt="Screvyn" width="700" />
+  <img src="Asset/Screvyn_banner.png" alt="Screvyn" width="600" />
 </p>
 
 <p align="center">
-  <strong>The AI senior developer that reviews every pull request before a human does.</strong>
+  Code review on autopilot. Four AI agents. Every pull request.
 </p>
 
 <p align="center">
-  <a href="#how-it-works">How it works</a> •
-  <a href="#quick-start">Quick start</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#demo">Demo</a> •
-  <a href="#contributing">Contributing</a>
+  <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#how-it-works">How it works</a> &nbsp;·&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;·&nbsp;
+  <a href="docs/CONTRIBUTING.md">Contributing</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.12+-blue?logo=python" />
-  <img src="https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi" />
-  <img src="https://img.shields.io/badge/Gemini_API-2.5_flash-4285F4?logo=google" />
-  <img src="https://img.shields.io/badge/license-AGPL--3.0-green" />
   <img src="https://github.com/Vatsalya2003/screvyn_multi-agent-code-review-system/actions/workflows/ci.yml/badge.svg" />
+  <img src="https://img.shields.io/badge/tests-174_passing-brightgreen" />
+  <img src="https://img.shields.io/badge/python-3.12+-3776AB?logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" />
 </p>
 
 ---
 
-## What is Screvyn?
+Screvyn runs four specialist AI agents on every pull request — security, performance, code quality, and architecture — in parallel. Findings are ranked P0/P1/P2, posted directly on the PR with explanations and fixes, and fanned out to Teams and email. The whole thing takes about 25 seconds.
 
-Screvyn is a **multi-agent AI code review system** that catches security holes, performance bugs, and architectural issues — automatically on every pull request.
+It's not a wrapper around a single LLM call. Each agent has its own system prompt, its own focus area, and its own failure boundary. If one agent hits a rate limit, the other three still deliver. The AST parser (tree-sitter) gives agents structural context — functions, classes, imports, line ranges — so they produce specific findings, not generic advice.
 
-Four specialist agents run in parallel, each analyzing your code from a different angle, then deliver severity-ranked findings with ready-to-use fixes directly on your PR.
-
-**What makes it different from Copilot / CodeRabbit / PR-Agent:**
-
-- **Multi-agent pipeline** — 4 specialist agents, not a single LLM call
-- **AST-aware analysis** — tree-sitter parses code structure, not just text
-- **P0/P1/P2 severity ranking** — like a real engineering team's triage
-- **Human-tone reviews** — reads like a senior engineer, not a robot
-- **Notification fan-out** — GitHub comment + Slack + Teams + Email simultaneously
+<p align="center">
+  <img src="Asset/screvyn-pr-review.png" alt="Screvyn reviewing a pull request" width="680" />
+</p>
 
 ---
-## Architecture
 
-<p align="center">
-  <img src="Asset/screvyn_full_architecture.svg" alt="Screvyn Architecture" width="700" />
-</p>
+## Quick start
 
-## Demo
+You need Python 3.12+, a [Gemini API key](https://aistudio.google.com/apikey) (free tier), and an [Upstash Redis](https://upstash.com) instance (free tier).
 
-<p align="center">
-  <img src="docs/assets/screvyn-pr-review.png" alt="Screvyn PR Review" width="700" />
-</p>
+```bash
+git clone https://github.com/Vatsalya2003/screvyn_multi-agent-code-review-system.git
+cd screvyn_multi-agent-code-review-system/backend
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # add your keys
+pytest tests/ -v        # 174 tests, <3 seconds
+```
 
-> Push code → Screvyn reviews it in ~25 seconds → findings appear on your PR with severity rankings, explanations, and fixes.
+Start the server:
+
+```bash
+# terminal 1
+celery -A celery_app worker --loglevel=info --concurrency=2
+
+# terminal 2
+uvicorn main:app --reload --port 8000
+```
+
+Try a review:
+
+```bash
+curl -s -X POST http://localhost:8000/api/review \
+  -H "Content-Type: application/json" \
+  -d '{"code": "import sqlite3\ndef get_user(uid):\n    return sqlite3.connect(\"db\").execute(f\"SELECT * FROM users WHERE id={uid}\")", "language": "python"}' \
+  | python -m json.tool
+```
+
+You'll get back a JSON response with severity-ranked findings, flagged code, and fixes.
+
+For automatic PR reviews, set up a [GitHub App](docs/GITHUB_APP_SETUP.md) and point the webhook at your server. Screvyn verifies the HMAC signature, enqueues a Celery task, and posts the review as a PR comment — all within 30 seconds of the push.
 
 ---
 
 ## How it works
 
 ```
-git push / PR opened
-       ↓
-GitHub Webhook (HMAC-SHA256 verified)
-       ↓
-FastAPI receives → Celery enqueues (returns 202 in <200ms)
-       ↓
-Celery worker picks up job
-       ↓
-tree-sitter AST parsing
-  → Language detection (Python, JavaScript, Java)
-  → Extract functions, classes, imports, line ranges
-       ↓
-LangGraph orchestrator — 4 agents run IN PARALLEL
-  ├── Security Agent    (OWASP Top 10, secrets, injections)
-  ├── Performance Agent (N+1 queries, O(n²), memory leaks)
-  ├── Code Smell Agent  (dead code, magic numbers, god classes)
-  └── Architecture Agent (SOLID violations, coupling, patterns)
-       ↓
-Severity Aggregator
-  → Deduplicate overlapping findings
-  → Rank: P0 (blocking) / P1 (important) / P2 (nit)
-       ↓
-Output — all fire simultaneously
-  ├── GitHub PR comment (Markdown, severity-ranked)
-  ├── Slack notification (Block Kit)
-  ├── Teams notification (Adaptive Card)
-  └── Email alert (P0 + P1 only)
+PR opened
+  → GitHub sends webhook (HMAC-SHA256 signed)
+  → FastAPI verifies signature, checks rate limit, returns 202
+  → Celery worker picks up the job from Redis
+
+Worker:
+  → Fetches changed files via GitHub API
+  → tree-sitter parses each file into an AST
+  → LangGraph runs 4 agents in parallel:
+      Security     — OWASP Top 10, leaked secrets, injections
+      Performance  — N+1 queries, O(n²), memory leaks, blocking calls
+      Code smell   — dead code, god classes, magic numbers, naming
+      Architecture — SOLID violations, coupling, missing patterns
+
+  → Severity aggregator deduplicates and ranks findings P0/P1/P2
+  → Comment posted on the PR
+  → Teams notification sent (Adaptive Card)
+  → Email sent for P0/P1 findings (via Resend)
+  → Review saved to Firebase Firestore
 ```
 
----
-
-## Quick start
-
-### Prerequisites
-
-- Python 3.12+
-- A [Gemini API key](https://aistudio.google.com/apikey) (free tier works)
-- A GitHub App (for webhook + PR comments)
-- Upstash Redis (free tier)
-
-### 1. Clone and install
-
-```bash
-git clone https://github.com/Vatsalya2003/screvyn_multi-agent-code-review-system.git
-cd screvyn_multi-agent-code-review-system/backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-### 3. Run tests
-
-```bash
-pytest tests/ -v
-# 148+ tests, all green, <1 second
-```
-
-### 4. Start the server
-
-```bash
-# Terminal 1: Celery worker
-celery -A celery_app worker --loglevel=info --concurrency=2
-
-# Terminal 2: FastAPI
-uvicorn main:app --reload --port 8000
-```
-
-### 5. Try a manual review
-
-```bash
-curl -s -X POST http://localhost:8000/api/review \
-  -H "Content-Type: application/json" \
-  -d '{"code": "import sqlite3\ndef get_user(uid):\n    return sqlite3.connect(\"db\").execute(f\"SELECT * FROM users WHERE id={uid}\")", "language": "python"}' | python -m json.tool
-```
+The webhook responds in under 200ms. The full review takes 20–30 seconds depending on file count and Gemini response times. If an agent fails (rate limit, timeout, parse error), the others continue — partial results always ship.
 
 ---
 
 ## Architecture
 
-### Tech stack
+<p align="center">
+  <img src="Asset/screvyn_full_architecture.svg" alt="Architecture" width="680" />
+</p>
 
-| Layer | Technology | Why |
+### Stack
+
+| What | Tech | Why |
 |---|---|---|
-| API | FastAPI | Async, auto-generated docs, Pydantic validation |
-| LLM | Gemini API (2.5 Flash) | Free tier, fast, structured JSON output |
-| Orchestration | LangGraph | Parallel agent execution with shared state |
-| AST Parsing | tree-sitter | Same parser as VS Code, supports 50+ languages |
-| Job Queue | Celery + Redis | Async processing, GitHub never times out |
-| Auth | GitHub App (JWT) | Bot identity, installation tokens, webhook verification |
-| Rate Limiting | Redis INCR | Atomic, per-repo monthly counters |
-| CI | GitHub Actions | Tests on every push, secret scanning |
+| API server | FastAPI | async, Pydantic validation, auto docs at `/docs` |
+| LLM | Gemini 2.5 Flash | free tier, fast, structured JSON output |
+| Agent orchestration | LangGraph | parallel execution with typed shared state |
+| Code parsing | tree-sitter | same parser VS Code uses, error-tolerant |
+| Job queue | Celery + Upstash Redis | async processing so GitHub never times out |
+| GitHub integration | GitHub App (JWT) | bot identity, installation tokens, webhook HMAC |
+| Rate limiting | Redis INCR + EXPIRE | atomic counters, per-repo, per-month |
+| Notifications | Teams webhooks, Resend | Adaptive Cards, HTML email for P0/P1 only |
+| Storage | Firebase Firestore | review history, repo stats |
+| CI | GitHub Actions | tests + gitleaks on every push |
 
-### Agent system
+### Agents
 
-Each agent is a specialist with its own system prompt:
+Each agent receives the raw code plus an AST context string (extracted functions, classes, imports with line ranges). Each has a separate system prompt tuned for its domain. All four run simultaneously via LangGraph's parallel node execution.
 
-| Agent | Catches | Example |
+| Agent | Focus | Example finding |
 |---|---|---|
-| **Security** | OWASP Top 10, leaked secrets | SQL injection, hardcoded API keys |
-| **Performance** | Slow code, wasteful patterns | N+1 queries, O(n²) loops |
-| **Code Smell** | Maintainability issues | God classes, magic numbers, dead code |
-| **Architecture** | Design violations | SOLID violations, tight coupling |
+| Security | OWASP Top 10, secrets, injection, auth bypass | SQL injection via f-string in `get_user` (line 12) |
+| Performance | N+1, complexity, memory, blocking calls | 1000 users = 1001 DB queries in `get_all_orders` |
+| Code smell | dead code, duplication, naming, magic numbers | `0.15` on line 36 — use `PREMIUM_DISCOUNT` |
+| Architecture | SOLID, coupling, missing abstractions | `UserManager` handles DB, email, validation, and logging |
 
-### Severity levels
+### Severity
 
-| Level | Label | Meaning |
+| Level | Tag | Meaning |
 |---|---|---|
-| **P0** | blocking | Must fix before merge. Security vulnerabilities, data loss risks. |
-| **P1** | important | Should fix before merge. Performance issues, design violations. |
-| **P2** | nit | Fix when you can. Style issues, minor improvements. |
+| P0 | `blocking` | must fix before merge — security vulns, data loss |
+| P1 | `important` | should fix before merge — perf issues, design violations |
+| P2 | `nit` | fix when convenient — style, minor improvements |
+
+The aggregator deduplicates findings from different agents that flag the same code region (50% line overlap + 60% title similarity). The highest severity wins. PR comments cap at 7 findings shown — all P0s always appear, remaining slots filled by P1 then P2.
 
 ---
 
-## Project structure
+## Project layout
 
 ```
-screvyn/
-├── backend/
-│   ├── main.py                     # FastAPI entry point
-│   ├── celery_app.py               # Celery + Redis configuration
-│   ├── agents/
-│   │   ├── orchestrator.py         # LangGraph parallel execution
-│   │   ├── security_agent.py       # OWASP, secrets, injections
-│   │   ├── performance_agent.py    # N+1, complexity, memory
-│   │   ├── smell_agent.py          # Dead code, naming, duplication
-│   │   └── architecture_agent.py   # SOLID, coupling, patterns
-│   ├── core/
-│   │   ├── ast_parser.py           # tree-sitter parsing
-│   │   ├── config.py               # Centralized settings
-│   │   ├── github_client.py        # GitHub App JWT auth + API
-│   │   ├── llm_client.py           # Gemini API wrapper
-│   │   ├── rate_limiter.py         # Redis-based rate limiting
-│   │   ├── review_style.py         # Human-tone writing rules
-│   │   └── severity.py             # Dedup + severity aggregation
-│   ├── notifications/
-│   │   ├── github_comment_formatter.py
-│   │   ├── slack.py
-│   │   ├── teams.py
-│   │   └── email_notify.py
-│   ├── routers/
-│   │   ├── reviews.py              # POST /api/review
-│   │   └── webhook.py              # POST /api/webhook
-│   ├── tasks/
-│   │   └── review_task.py          # Async Celery review pipeline
-│   └── tests/                      # 148+ unit tests
-├── frontend/                       # Next.js dashboard (Phase 8)
-└── docs/
+backend/
+├── main.py                          # FastAPI app, health check, /api/review
+├── celery_app.py                    # Celery config, Redis broker, SSL setup
+├── agents/
+│   ├── orchestrator.py              # LangGraph graph, parallel fan-out + merge
+│   ├── security_agent.py
+│   ├── performance_agent.py
+│   ├── smell_agent.py
+│   └── architecture_agent.py
+├── core/
+│   ├── ast_parser.py                # tree-sitter: Python, JS, Java
+│   ├── config.py                    # settings dataclass, env vars
+│   ├── firebase_client.py           # Firestore CRUD + repo stats
+│   ├── github_client.py             # JWT auth, fetch files, post comments
+│   ├── llm_client.py                # Gemini wrapper, JSON extraction, retries
+│   ├── rate_limiter.py              # Redis INCR, fail-open on error
+│   ├── review_style.py              # tone rules shared across agents
+│   └── severity.py                  # dedup, merge, sort by severity
+├── notifications/
+│   ├── github_comment_formatter.py  # Markdown PR comment
+│   ├── dispatcher.py                # fan-out: Teams + email + Firestore
+│   ├── teams.py                     # Adaptive Card builder + sender
+│   └── email_notify.py              # Resend HTML, P0/P1 only
+├── routers/
+│   ├── reviews.py                   # POST /api/review
+│   └── webhook.py                   # POST /api/webhook, HMAC verify
+├── tasks/
+│   └── review_task.py               # Celery task: full pipeline
+└── tests/                           # 174 tests, <3s, zero external deps
+    ├── test_models.py
+    ├── test_ast_parser.py
+    ├── test_agents.py
+    ├── test_orchestrator.py
+    ├── test_severity.py
+    ├── test_github_comment.py
+    ├── test_rate_limiter.py
+    ├── test_webhook.py
+    ├── test_notifications.py
+    └── test_firebase.py
 ```
 
 ---
 
 ## API
 
-### `POST /api/review` — Manual review
+**`POST /api/review`** — paste code, get findings back.
 
-```json
-// Request
-{ "code": "your code here", "language": "python" }
-
-// Response
-{
-  "repo": "paste/anonymous",
-  "findings": [...],
-  "p0_count": 1, "p1_count": 2, "p2_count": 3,
-  "agents_completed": ["security", "performance", "smell", "architecture"],
-  "review_duration_seconds": 24.5
-}
+```bash
+curl -X POST http://localhost:8000/api/review \
+  -H "Content-Type: application/json" \
+  -d '{"code": "your code", "language": "python"}'
 ```
 
-### `POST /api/webhook` — GitHub webhook
+Returns findings array with severity, explanation, flagged code, and fix for each.
 
-Receives `pull_request` events, verifies HMAC signature, enqueues async review.
-Returns `202 Accepted` immediately.
+**`POST /api/webhook`** — receives GitHub `pull_request` events, verifies HMAC-SHA256 signature, enqueues async review. Returns `202 Accepted`.
 
-### `GET /` — Health check
+**`GET /`** — health check.
 
-```json
-{ "status": "ok", "service": "screvyn", "version": "0.2.0" }
+---
+
+## Environment variables
+
+```bash
+# required
+GEMINI_API_KEY=your_gemini_key
+REDIS_URL=rediss://default:xxx@xxx.upstash.io:6379
+
+# GitHub App (for PR reviews)
+GITHUB_APP_ID=123456
+GITHUB_PRIVATE_KEY_PATH=./your-app.private-key.pem
+GITHUB_WEBHOOK_SECRET=your_secret
+GITHUB_INSTALLATION_ID=12345678
+
+# notifications (optional)
+TEAMS_WEBHOOK_URL=https://outlook.office.com/webhook/xxx
+RESEND_API_KEY=re_xxx
+FIREBASE_PROJECT_ID=your-project
+FIREBASE_CREDENTIALS_PATH=./firebase-credentials.json
 ```
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for setup instructions.
+The easiest way to contribute:
 
-**Good first issues:**
-- Add a new language to the AST parser (Rust, Go, TypeScript)
-- Improve agent prompts with better examples
-- Add new notification channels (Discord, PagerDuty)
-- Build a VS Code extension
+- **Add a language** — tree-sitter supports 50+ languages. Adding one takes ~15 minutes: install the grammar, map node types in `ast_parser.py`, add a test fixture.
+- **Improve agent prompts** — better examples in system prompts = better findings. Test with `pytest tests/test_agents.py`.
+- **Add a notification channel** — Discord, Slack, PagerDuty. The dispatcher pattern makes this a single-file addition.
+- **Report false positives** — open an issue with the code snippet and the incorrect finding.
+
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for local setup instructions.
 
 ---
 
 ## Roadmap
 
-- [x] Gemini integration + Pydantic models
-- [x] Security agent + FastAPI endpoint
-- [x] tree-sitter AST parser (Python, JS, Java)
-- [x] 4 parallel agents + LangGraph orchestration
-- [x] Severity aggregator + deduplication
-- [x] Celery + Redis + GitHub webhook + PR comments
-- [ ] Slack + Teams + Email notifications
-- [ ] Next.js dashboard + Firebase
+- [x] Gemini integration, Pydantic models, structured JSON parsing
+- [x] Security agent with OWASP-focused prompts
+- [x] tree-sitter AST parser (Python, JavaScript, Java)
+- [x] 4 parallel agents via LangGraph
+- [x] Severity aggregator with deduplication
+- [x] Celery + Redis async queue, GitHub webhook, PR comments
+- [x] Teams + Email notifications, Firebase storage
+- [ ] Next.js dashboard with review history and severity trends
+- [ ] VS Code extension (review on save)
+- [ ] Slack Block Kit notifications
+- [ ] Additional languages (Go, Rust, TypeScript)
 
 ---
 
 ## License
 
-[AGPL-3.0](LICENSE) — free for personal and open-source use. Commercial license available for companies that don't want to open-source their modifications.
+[AGPL-3.0](LICENSE). Free for personal and open-source use. If your company modifies Screvyn and deploys it internally without open-sourcing the changes, you need a commercial license — [get in touch](mailto:vatsalya@screvyn.dev).
 
 ---
 
 <p align="center">
-  <sub>Built by <a href="https://github.com/Vatsalya2003">Vatsalya Dabhi</a></sub>
+  Built by <a href="https://github.com/Vatsalya2003">Vatsalya Dabhi</a>
 </p>
