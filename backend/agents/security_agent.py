@@ -113,7 +113,7 @@ def _normalize_severity(raw_severity: str) -> str:
 
 def _normalize_line_range(raw_range: str) -> str:
     """
-    Clean up the line_range field to match our regex pattern: ^\d+(-\d+)?$
+    Clean up the line_range field to match our regex pattern for digits and dashes.
 
     Why this exists: The LLM sometimes returns "lines 5-7" or "5 - 7" or
     "line 5" instead of the clean "5-7" format our Pydantic model requires.
