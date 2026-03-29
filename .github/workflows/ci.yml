@@ -24,14 +24,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run unit tests (Phase 1 - models)
+      - name: Run model tests (Phase 1)
         working-directory: backend
         run: pytest tests/test_models.py -v
 
-      - name: Run unit tests (Phase 2 - agent normalization)
-        working-directory: backend
-        run: pytest tests/test_agents.py::TestNormalization -v
-
-      - name: Run unit tests (Phase 3 - AST parser)
+      - name: Run AST parser tests (Phase 3)
         working-directory: backend
         run: pytest tests/test_ast_parser.py -v
+
+      - name: Run agent normalization tests (Phase 2)
+        working-directory: backend
+        env:
+          GEMINI_API_KEY: "fake-key-for-ci-import-only"
+        run: pytest tests/test_agents.py::TestNormalization -v
+
+      - name: Run orchestrator unit tests (Phase 4)
+        working-directory: backend
+        env:
+          GEMINI_API_KEY: "fake-key-for-ci-import-only"
+        run: pytest tests/test_orchestrator.py::TestMergeFindingsUnit -v
